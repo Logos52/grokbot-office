@@ -23,9 +23,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - name: Install lint-kit
         env:
           LINT_KIT_DEPLOY_KEY: ${{ secrets.LINT_KIT_DEPLOY_KEY }}
@@ -93,7 +90,20 @@ jobs:
 
           npm install --prefix "$RUNNER_TEMP/lint-kit" --install-strategy=nested --no-save --no-package-lock "$src"
           npm --prefix "$RUNNER_TEMP/lint-kit/node_modules/lint-kit" run build
-          python -m pip install -r "$RUNNER_TEMP/lint-kit/node_modules/lint-kit/requirements.txt"
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "python3 is not installed on the runner" >&2
+            exit 1
+          fi
+          req="$RUNNER_TEMP/lint-kit/node_modules/lint-kit/requirements.txt"
+          venv="$RUNNER_TEMP/kit-venv"
+          if python3 -m venv "$venv"; then
+            "$venv/bin/python" -m pip install --upgrade pip
+            "$venv/bin/python" -m pip install -r "$req"
+            echo "$venv/bin" >> "$GITHUB_PATH"
+          else
+            python3 -m pip install --user -r "$req"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
       - name: Check
         run: |
           mkdir -p node_modules/.bin
