@@ -88,13 +88,13 @@ jobs:
             exit 1
           fi
 
-          npm install --prefix "$RUNNER_TEMP/lint-kit" --install-strategy=nested --no-save --no-package-lock "$src"
-          npm --prefix "$RUNNER_TEMP/lint-kit/node_modules/lint-kit" run build
+          npm install --prefix "$src" --install-strategy=nested --no-audit --no-fund --no-package-lock
+          npm --prefix "$src" run build
           if ! command -v python3 >/dev/null 2>&1; then
             echo "python3 is not installed on the runner" >&2
             exit 1
           fi
-          req="$RUNNER_TEMP/lint-kit/node_modules/lint-kit/requirements.txt"
+          req="$src/requirements.txt"
           venv="$RUNNER_TEMP/kit-venv"
           if python3 -m venv "$venv"; then
             "$venv/bin/python" -m pip install --upgrade pip
@@ -107,7 +107,7 @@ jobs:
       - name: Check
         run: |
           mkdir -p node_modules/.bin
-          ln -sfn "$RUNNER_TEMP/lint-kit/node_modules/.bin/kit" node_modules/.bin/kit
+          ln -sfn "$RUNNER_TEMP/lint-kit-src/node_modules/.bin/kit" node_modules/.bin/kit
           if [ -n "${GITHUB_BASE_REF:-}" ]; then
             git fetch --depth 1 origin "$GITHUB_BASE_REF"
           fi
