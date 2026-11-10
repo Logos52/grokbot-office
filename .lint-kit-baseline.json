@@ -1,0 +1,20 @@
+{
+  "pin": "11b2880e890ba1525775843e3f6027e729afbe25",
+  "entries": [
+    {
+      "rule": "R10",
+      "file": ".github/workflows/lint-kit.yml",
+      "fingerprint": "28e394ce"
+    },
+    {
+      "rule": "R10",
+      "file": ".github/workflows/lint-kit.yml",
+      "fingerprint": "617d2e41"
+    },
+    {
+      "rule": "R10",
+      "file": ".github/workflows/lint-kit.yml",
+      "fingerprint": "b8a1ce5a"
+    }
+  ]
+}

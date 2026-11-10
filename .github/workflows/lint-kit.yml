@@ -1,0 +1,140 @@
+name: lint-kit
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  kit-check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, grokbot-office]
+    timeout-minutes: 20
+    env:
+      LINT_KIT_PIN: 11b2880e890ba1525775843e3f6027e729afbe25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install lint-kit
+        env:
+          LINT_KIT_DEPLOY_KEY: ${{ secrets.LINT_KIT_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          pin="$LINT_KIT_PIN"
+          if ! printf '%s' "$pin" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "refusing lint-kit pin that is not a full commit" >&2
+            exit 1
+          fi
+
+          src="$RUNNER_TEMP/lint-kit-src"
+          mirror="/home/box/mirrors/lint-kit.git"
+
+          checkout_pin() {
+            local url="$1"
+            rm -rf "$src"
+            if git -c safe.directory='*' init --quiet "$src" \
+              && git -c safe.directory='*' -C "$src" remote add origin "$url" \
+              && git -c safe.directory='*' -C "$src" fetch --depth 1 origin "$pin" \
+              && git -c safe.directory='*' -C "$src" checkout --detach --quiet FETCH_HEAD; then
+              :
+            else
+              rm -rf "$src"
+              git -c safe.directory='*' clone --no-checkout --quiet "$url" "$src"
+              git -c safe.directory='*' -C "$src" checkout --detach --quiet "$pin"
+            fi
+            local head
+            head="$(git -c safe.directory='*' -C "$src" rev-parse HEAD)"
+            if [ "$head" != "$pin" ]; then
+              echo "refusing lint-kit commit $head (pin is $pin)" >&2
+              rm -rf "$src"
+              return 1
+            fi
+          }
+
+          installed=0
+          if [ -n "${LINT_KIT_DEPLOY_KEY:-}" ]; then
+            keyfile="$(mktemp)"
+            chmod 600 "$keyfile"
+            printf '%s\n' "$LINT_KIT_DEPLOY_KEY" > "$keyfile"
+            if GIT_SSH_COMMAND="ssh -i ${keyfile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+              checkout_pin "git@github.com:Logos52/lint-kit.git"; then
+              installed=1
+            else
+              echo "deploy-key install failed; using the box mirror" >&2
+              rm -rf "$src"
+            fi
+            rm -f "$keyfile"
+          fi
+
+          if [ "$installed" -ne 1 ]; then
+            if [ ! -e "$mirror" ]; then
+              echo "lint-kit deploy key unavailable and box mirror $mirror is missing" >&2
+              exit 1
+            fi
+            checkout_pin "$mirror"
+          fi
+
+          head="$(git -c safe.directory='*' -C "$src" rev-parse HEAD)"
+          if [ "$head" != "$pin" ]; then
+            echo "refusing lint-kit commit $head (pin is $pin)" >&2
+            exit 1
+          fi
+
+          npm install --prefix "$src" --install-strategy=nested --no-audit --no-fund --no-package-lock
+          npm --prefix "$src" run build
+          npm install --prefix "$RUNNER_TEMP/lint-kit" --install-strategy=nested --no-save --no-package-lock "$src"
+          if [ ! -e "$RUNNER_TEMP/lint-kit/node_modules/.bin/kit" ]; then
+            echo "kit executable missing after install" >&2
+            npm --prefix "$src" pkg get bin >&2 || true
+            ls -la "$RUNNER_TEMP/lint-kit/node_modules/.bin" >&2 || true
+            exit 1
+          fi
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "python3 is not installed on the runner" >&2
+            exit 1
+          fi
+          req="$src/requirements.txt"
+          venv="$RUNNER_TEMP/kit-venv"
+          if python3 -m venv "$venv"; then
+            "$venv/bin/python" -m pip install --upgrade pip
+            "$venv/bin/python" -m pip install -r "$req"
+            echo "$venv/bin" >> "$GITHUB_PATH"
+          else
+            python3 -m pip install --user -r "$req"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Check
+        run: |
+          mkdir -p node_modules/.bin
+          ln -sfn "$RUNNER_TEMP/lint-kit/node_modules/.bin/kit" node_modules/.bin/kit
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            git fetch --depth 1 origin "$GITHUB_BASE_REF"
+          fi
+          set +e
+          set -o pipefail
+          npx kit check | tee "$RUNNER_TEMP/kit-check.txt"
+          status=${PIPESTATUS[0]}
+          {
+            echo "## kit check"
+            echo
+            echo "baseline lines: $(grep -c '^baseline ' "$RUNNER_TEMP/kit-check.txt" || true)"
+            echo
+            echo "warn lines: $(grep -c '^warn ' "$RUNNER_TEMP/kit-check.txt" || true)"
+            echo
+            echo "summary:"
+            echo
+            grep '^summary ' "$RUNNER_TEMP/kit-check.txt" || true
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/kit-check.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
