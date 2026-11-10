@@ -111,6 +111,21 @@ jobs:
             python3 -m pip install --user -r "$req"
             echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           fi
+      - name: Write baseline
+        run: |
+          mkdir -p node_modules/.bin
+          ln -sfn "$RUNNER_TEMP/lint-kit/node_modules/.bin/kit" node_modules/.bin/kit
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            git fetch --depth 1 origin "$GITHUB_BASE_REF"
+          fi
+          npx kit baseline --help > "$RUNNER_TEMP/kit-baseline-help.txt" 2>&1 || true
+          echo BASELINE_HELP_START
+          cat "$RUNNER_TEMP/kit-baseline-help.txt"
+          echo BASELINE_HELP_END
+          npx kit baseline
+          echo BASELINE_JSON_START
+          cat .lint-kit-baseline.json
+          echo BASELINE_JSON_END
       - name: Check
         run: |
           mkdir -p node_modules/.bin
